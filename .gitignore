@@ -128,4 +128,5 @@ dmypy.json
 # Pyre type checker
 .pyre/
 # Pretrained model
-*.pth
+scatter_text_recognizer/weights/scatter-case-sensitive.pth
+craft_text_detector/weights/*.pth

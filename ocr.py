@@ -249,7 +249,7 @@ class OCR:
 		
 		return json_list
 
-	def ocr_with_split(self, image, h_thres=2, v_thres=0.3 # Threshold for splitting line horizontally and vertically):
+	def ocr_with_split(self, image, h_thres=2, v_thres=0.3): # Threshold for splitting line horizontally and vertically:
 		def consec(lst):
 			it = iter(lst)
 			prev = next(it)

@@ -130,3 +130,7 @@ dmypy.json
 # Pretrained model
 scatter_text_recognizer/weights/scatter-case-sensitive.pth
 craft_text_detector/weights/*.pth
+
+# Images
+crop/*
+test_im/*

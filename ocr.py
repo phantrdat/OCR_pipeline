@@ -217,7 +217,7 @@ class OCR:
 				rect = cv2.boundingRect(pts)
 				x,y,w,h = rect
 				
-				if self.cfg.craft_padding:
+				if self.cfg.craft_padding_ratio != None:
 					box_padding = int(h/self.cfg.craft_padding_ratio)
 				else:
 					box_padding = 0
@@ -230,7 +230,6 @@ class OCR:
 				p4 = max(0,int(pts[2][1])) 
 				cbb = f'{p1}-{p2}_{p3}-{p4}'
 				all_text[cbb] = Image.fromarray(croped)
-				cv2.imwrite(f'crop/{cbb}.jpg', croped)
 			except Exception:
 				pass
 		pred_str, pred_conf = self.recognize(all_text)
@@ -238,7 +237,7 @@ class OCR:
 		for boxes, text, conf in zip(polys, pred_str, pred_conf):
 			word_pred_dict = {}
 			word_pred_dict['text'] = text
-			if self.cfg.craft_padding:
+			if self.cfg.craft_padding_ratio != None:
 				h = max(0,int(boxes[2][1])) - max(0,int(boxes[0][1]))
 				box_padding = int(h/self.cfg.craft_padding_ratio)
 			else:

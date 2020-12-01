@@ -16,7 +16,7 @@ class Config:
         self.craft_refine=False
         self.craft_refiner_model='./craft_text_detector/weights/craft_refiner_CTW1500.pth'
 
-        self.craft_padding_ratio = 8 #Extend detected boxes generated from CRAFT. Each box will be add "box_height/craft_padding_ratio" both sides
+        self.craft_padding_ratio = 8 # Extend detected boxes generated from CRAFT. Each box will be add "box_height/craft_padding_ratio" both sides
 
         """ Config of recognition module """
         self.scatter_feature_extraction='ResNet'

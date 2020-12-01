@@ -9,15 +9,15 @@ if __name__ == '__main__':
 
 	# Use original version (no_split + craft + scatter)
 	
-	image = 'test_im/2.png' # or image = imgproc.loadImage('test_im/1.png')
+	image = 'test_im/1.png' # or image = imgproc.loadImage('test_im/1.png')
 	final_json_list= ocr.ocr(image)
 	image = ocr.plot(image, final_json_list)
-	cv2.imwrite('1_original.jpg',image)
+	cv2.imwrite('result/1_original.jpg',image)
 
 
 
 	# Use enhanced version (split + craft + scatter)
-	image = 'test_im/2.png' # or image = imgproc.loadImage('test_im/1.png')
+	image = 'test_im/1.png' # or image = imgproc.loadImage('test_im/1.png')
 	final_json_list,_,_ = ocr.ocr_with_split(image)
 	image = ocr.plot(image, final_json_list)
-	cv2.imwrite('1_split.jpg',image)
+	cv2.imwrite('result/1_split.jpg',image)

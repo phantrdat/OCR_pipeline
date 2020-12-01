@@ -134,3 +134,5 @@ craft_text_detector/weights/*.pth
 # Images
 crop/*
 test_im/*
+1_original.jpg
+1_split.jpg

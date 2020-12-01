@@ -35,3 +35,4 @@ class Config:
         self.scatter_sensitive=True
         self.scatter_workers=4
         self.scatter_model='./scatter_text_recognizer/weights/scatter-case-sensitive.pth'
+        

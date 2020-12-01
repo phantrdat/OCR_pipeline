@@ -13,10 +13,10 @@ import cv2
 from skimage import io
 import numpy as np
 from tqdm import tqdm
+import more_itertools as mit
 import string
 from craft_text_detector import *
 from scatter_text_recognizer import *
-
 from ocr_utils import copyStateDict, plot_one_box, Params
 
 class OCR:
@@ -251,17 +251,9 @@ class OCR:
 
 	def ocr_with_split(self, image, h_thres=2, v_thres=0.3): # Threshold for splitting line horizontally and vertically:
 		def consec(lst):
-			it = iter(lst)
-			prev = next(it)
-			tmp = [prev]
-			for ele in it:
-				if prev + 1 != ele:
-					yield tmp
-					tmp = [ele]
-				else:
-					tmp.append(ele)
-				prev = ele
-			yield tmp
+			G = mit.consecutive_groups(lst)
+			G = [list(g) for g in G]
+			return G
 
 		t = time.time()
 		final_output = {}
@@ -275,7 +267,7 @@ class OCR:
 		# First split text image horizontally, then split vertically
 		horizontal_line_score = np.sum(score_text, axis=1)
 		horizontal_empty_line_index = np.where(horizontal_line_score<= h_thres)[0].tolist()
-		horizontal_empty_line_index = list(consec(horizontal_empty_line_index))
+		horizontal_empty_line_index = consec(horizontal_empty_line_index)
 		horizontal_empty_line_index = [e for e in horizontal_empty_line_index if len(e)>1]
 		horizontal_cut_lines = []
 		for i, line in enumerate(horizontal_empty_line_index):
@@ -294,7 +286,7 @@ class OCR:
 			patch_score = score_text[horizontal_cut_lines[i]:horizontal_cut_lines[i+1]]
 			vertical_patch_score = np.sum(patch_score, axis=0)
 			vertical_empty_patch_index = np.where(vertical_patch_score<= v_thres)[0].tolist()
-			vertical_empty_patch_index = list(consec(vertical_empty_patch_index))
+			vertical_empty_patch_index = consec(vertical_empty_patch_index)
 			vertical_empty_patch_index = [e for e in vertical_empty_patch_index if len(e)>1]
 			vertical_patch_cut_lines = []
 			for i, line in enumerate(vertical_empty_patch_index):

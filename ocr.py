@@ -5,7 +5,6 @@ import argparse
 
 import torch
 import torch.nn as nn
-import torch.backends.cudnn as cudnn
 from torch.autograd import Variable
 import torch.nn.functional as F
 from PIL import Image
@@ -16,7 +15,7 @@ from tqdm import tqdm
 import string
 from craft_text_detector import *
 from scatter_text_recognizer import *
-from ocr_config import Config
+
 from ocr_utils import copyStateDict, plot_one_box, Params
 
 class OCR:
@@ -34,7 +33,6 @@ class OCR:
 			self.craft.load_state_dict(copyStateDict(torch.load(self.cfg.craft_model, map_location='cpu')))
 		if self.cfg.cuda:
 			self.craft = self.craft.cuda()
-			# self.craft = torch.nn.DataParallel(self.craft)
 			cudnn.benchmark = False
 		
 		self.craft.eval()
@@ -251,7 +249,7 @@ class OCR:
 		
 		return json_list
 
-	def ocr_with_split(self, image, h_thres=2, v_thres=0.3):
+	def ocr_with_split(self, image, h_thres=2, v_thres=0.3 # Threshold for splitting line horizontally and vertically):
 		def consec(lst):
 			it = iter(lst)
 			prev = next(it)
@@ -340,23 +338,4 @@ class OCR:
 
 
 
-if __name__ == '__main__':
 
-	cfg = Config()
-	ocr = OCR(cfg)
-	ocr.load_net()
-
-	# Use original version (no_split + craft + scatter)
-	
-	image = 'test_im/1.png' # or image = imgproc.loadImage('test_im/1.png')
-	final_json_list= ocr.ocr(image)
-	image = ocr.plot(image, final_json_list)
-	cv2.imwrite('1_original.jpg',image)
-
-
-
-	# Use enhanced version (split + craft + scatter)
-	image = 'test_im/1.png' # or image = imgproc.loadImage('test_im/1.png')
-	final_json_list,_,_ = ocr.ocr_with_split(image)
-	image = ocr.plot(image, final_json_list)
-	cv2.imwrite('1_split.jpg',image)

@@ -283,7 +283,7 @@ class OCR:
 		# Split vertically on each horizontally patches
 		vertical_cut_lines = []
 		if len(horizontal_cut_lines)==0:
-			horizontal_cut_lines = [0, im_h]
+			horizontal_cut_lines = [0, im_height]
 		for i in range(0,len(horizontal_cut_lines),2):
 			patch_score = score_text[horizontal_cut_lines[i]:horizontal_cut_lines[i+1]]
 			vertical_patch_score = np.sum(patch_score, axis=0)

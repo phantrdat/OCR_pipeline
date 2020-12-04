@@ -259,7 +259,7 @@ class OCR:
 		final_output = {}
 		if isinstance(image, str):
 			image = imgproc.loadImage(image)
-		
+		im_height, im_width, _ = image.shape
 		_, _, score_text, target_ratio = self.detection(image)
 
 
@@ -282,6 +282,8 @@ class OCR:
 
 		# Split vertically on each horizontally patches
 		vertical_cut_lines = []
+		if len(horizontal_cut_lines)==0:
+			horizontal_cut_lines = [0, im_h]
 		for i in range(0,len(horizontal_cut_lines),2):
 			patch_score = score_text[horizontal_cut_lines[i]:horizontal_cut_lines[i+1]]
 			vertical_patch_score = np.sum(patch_score, axis=0)
@@ -300,6 +302,8 @@ class OCR:
 		final_json_list = []
 		for i in range(0, len(final_horizontal_cut_lines)-1,2):
 			v_l = vertical_cut_lines[i//2]
+			if len(v_l)==0:
+				v_l = [0, im_width]
 			for j in range(len(v_l)-1):
 				split_im = image.copy()[final_horizontal_cut_lines[i]:final_horizontal_cut_lines[i+1], v_l[j]:v_l[j+1]]
 				json_list = self.ocr(split_im)

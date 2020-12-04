@@ -136,3 +136,4 @@ crop/*
 test_im/*
 1_original.jpg
 1_split.jpg
+result/*

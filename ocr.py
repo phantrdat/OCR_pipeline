@@ -232,7 +232,7 @@ class OCR:
 				cbb = f'{p1}-{p2}_{p3}-{p4}'
 				all_text[cbb] = Image.fromarray(croped)
 			except Exception:
-				print(y,y+h, x,x+w)
+				pass
 		pred_str, pred_conf = self.recognize(all_text)
 		json_list = []
 		for boxes, text, conf in zip(polys, pred_str, pred_conf):

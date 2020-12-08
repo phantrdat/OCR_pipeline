@@ -216,6 +216,7 @@ class OCR:
 				pts = polys[i]
 				rect = cv2.boundingRect(pts)
 				x,y,w,h = rect
+				x, y, w, h = max(x,0), max(y,0), max(w,0), max(h,0)
 				
 				if self.cfg.craft_padding_ratio != None:
 					box_padding = int(h/self.cfg.craft_padding_ratio)
@@ -231,7 +232,7 @@ class OCR:
 				cbb = f'{p1}-{p2}_{p3}-{p4}'
 				all_text[cbb] = Image.fromarray(croped)
 			except Exception:
-				pass
+				print(y,y+h, x,x+w)
 		pred_str, pred_conf = self.recognize(all_text)
 		json_list = []
 		for boxes, text, conf in zip(polys, pred_str, pred_conf):

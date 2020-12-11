@@ -8,7 +8,7 @@ class Config:
         self.craft_model ='./craft_text_detector/weights/craft_mlt_25k.pth'
         self.craft_text_threshold=0.6
         self.craft_low_text=0.4
-        self.craft_link_threshold=0.4
+        self.craft_link_threshold=0.3
         self.craft_canvas_size=1280
         self.craft_mag_ratio=1.0
         self.craft_poly=False
@@ -16,7 +16,9 @@ class Config:
         self.craft_refine=False
         self.craft_refiner_model='./craft_text_detector/weights/craft_refiner_CTW1500.pth'
 
-        self.craft_padding_ratio = 8 # Extend detected boxes generated from CRAFT. Each box will be add "box_height/craft_padding_ratio" both sides
+        self.craft_padding_ratio = None # Extend detected boxes generated from CRAFT. Each box will be add "box_height/craft_padding_ratio" both sides
+        self.transform_type =  None #'dilation'
+        self.transform_kernel_size = (3,3)
 
         """ Config of recognition module """
         self.scatter_feature_extraction='ResNet'

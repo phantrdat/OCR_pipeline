@@ -206,7 +206,13 @@ class OCR:
 	def ocr(self, image):
 		if isinstance(image, str):
 			image = imgproc.loadImage(image)
-		bboxes, polys, score_text, target_ratio = self.detection(image)
+		if self.cfg.transform_type == "dilation":
+			kernel = np.ones(self.cfg.transform_kernel_size,np.uint8)
+			# kernel = np.random.choice([0,1], size=self.cfg.transform_kernel_size).astype(np.uint8)
+			transformed_image = cv2.dilate(1-image, kernel, iterations = 1)
+		else:
+			transformed_image = image.copy()
+		bboxes, polys, score_text, target_ratio = self.detection(transformed_image)
 		raw_img = image[:,:,::-1]
 		clone = raw_img.copy()
 		all_text = {}
@@ -260,6 +266,8 @@ class OCR:
 		final_output = {}
 		if isinstance(image, str):
 			image = imgproc.loadImage(image)
+			
+
 		im_height, im_width, _ = image.shape
 		_, _, score_text, target_ratio = self.detection(image)
 
@@ -270,6 +278,8 @@ class OCR:
 		horizontal_empty_line_index = np.where(horizontal_line_score<= h_thres)[0].tolist()
 		horizontal_empty_line_index = consec(horizontal_empty_line_index)
 		horizontal_empty_line_index = [e for e in horizontal_empty_line_index if len(e)>1]
+		horizontal_empty_line_index.insert(0,[0])
+
 		horizontal_cut_lines = []
 		for i, line in enumerate(horizontal_empty_line_index):
 			if i==0: 
@@ -308,6 +318,7 @@ class OCR:
 			for j in range(len(v_l)-1):
 				split_im = image.copy()[final_horizontal_cut_lines[i]:final_horizontal_cut_lines[i+1], v_l[j]:v_l[j+1]]
 				json_list = self.ocr(split_im)
+				# cv2.imwrite(f'h_{final_horizontal_cut_lines[i]}{final_horizontal_cut_lines[i+1]}-w_{v_l[j]}{v_l[j+1]}.png', split_im)
 				for k in range(len(json_list)):
 					json_list[k]['x1'] += v_l[j]
 					json_list[k]['y1'] += final_horizontal_cut_lines[i]

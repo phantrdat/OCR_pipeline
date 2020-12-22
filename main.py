@@ -14,74 +14,6 @@ def preprocessing(img_path):
 	q = subprocess.Popen(scpComm, shell=True, stdout=subprocess.PIPE)
 	return pre_img_path
 
-def new_check_bb(data):
-	checkBB={}
-	for d in data:
-		key=d['text']+"_"+str(d['x1'])+"_"+str(d['y1'])+"_"+str(d['x2'])+"_"+str(d['y2'])
-		checkBB[key]="True"
-	return checkBB
-def sorted_in_line(line):
-	x1=[]
-	index=0
-	new_line=[]
-	for i in line:
-		x1.append(i['x1'])
-	x1=sorted(x1)
-
-	for x in x1:
-		for i in line:
-			if x==i['x1']:
-				new_line.append(i)
-				break
-	return new_line
-
-def merge_bb(bb1,bb2):
-	new_bb={
-		'text': bb1['text']+bb2['text'],
-		'x1': bb1['x1'],
-		'y1': min(bb1['y1'],bb2['y1']),
-		'x2':bb2['x2'],
-		'y2':max(bb1['y2'],bb2['y2']),
-		'confdt': max(bb1['confdt'],bb2['confdt'])
-	}
-	return new_bb
-def sorting_bb(data):
-	check = new_check_bb(data)
-	dem=0
-	sorted_line={}
-	final_list=[]
-
-	for d in data:
-		key=d['text']+"_"+str(d['x1'])+"_"+str(d['y1'])+"_"+str(d['x2'])+"_"+str(d['y2'])
-		if check[key] != "False":
-			line=[]
-			check[key]="False"
-			y2_tmp=d['y2']
-			line.append(d)
-			for k in data:
-				keyK=k['text']+"_"+str(k['x1'])+"_"+str(k['y1'])+"_"+str(k['x2'])+"_"+str(k['y2'])
-				if check[keyK] != "False":
-					k_y2_tmp=k['y2']
-					# print("k_y2: ",k_y2_tmp)
-					if abs(y2_tmp - k_y2_tmp)<=10:
-						# print(keyK)
-						check[keyK]="False"
-						line.append(k)
-					elif abs(y2_tmp - k_y2_tmp)>10:
-						# print("huhu")
-						break
-			dem+=1
-			sorted_line[dem]=sorted_in_line(line)
-			for i in range(len(sorted_line[dem])):
-				if i < (len(sorted_line[dem])-1):
-					if sorted_line[dem][i]['x2'] > sorted_line[dem][i+1]['x1']:
-						sorted_line[dem][i]=merge_bb(sorted_line[dem][i],sorted_line[dem][i+1])
-						sorted_line[dem].pop(i+1) 
-	for j in sorted_line.keys():
-		# print(j)
-		for k in sorted_line[j]:
-			final_list.append(k)
-	return final_list
 
 
 if __name__ == '__main__':
@@ -110,8 +42,9 @@ if __name__ == '__main__':
 			# pre_img_path=preprocessing('./data/'+img)
 			# print(pre_img_path)
 			# q = subprocess.Popen('cd /home/haophan/quephuong/OCR_pipline/', shell=True, stdout=subprocess.PIPE)
-			json_list_original= ocr.ocr('./data/'+img)
-			final_original=sorting_bb(json_list_original)
+			ocr.ocr('./data/'+img)
+
+			final_original=ocr.merge_box()
 
 			image = ocr.plot(img, final_original)
 			cv2.imwrite('result/'+img_name+'/'+'original.png',image)
@@ -120,8 +53,9 @@ if __name__ == '__main__':
 
 			# Use enhanced version (split + craft + scatter)
 			# image = 'test_im/1.png' # or image = imgproc.loadImage('test_im/1.png')
-			json_list_split,_,_ = ocr.ocr_with_split('./data/'+img)
-			final_split=sorting_bb(json_list_split)
+			ocr.ocr_with_split('./data/'+img)
+			final_split=ocr.merge_box()
+
 			image = ocr.plot(img, final_split)
 			cv2.imwrite('result/'+img_name+'/'+'split.png',image)
 			with open ('result/'+img_name+'/'+'split.json','w') as f:

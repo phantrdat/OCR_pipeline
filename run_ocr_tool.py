@@ -186,4 +186,4 @@ if __name__ == '__main__':
 			cv2.imwrite(f'result/{prefix}_{im_idx}.png',image)
 	
 	stat = pd.DataFrame({'Filename':idxs,'Running Time (No Split)':running_times})
-	stat.to_csv()
+	stat.to_csv('run_DO_resized_no_split.csv', index=False)

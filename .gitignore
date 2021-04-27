@@ -128,7 +128,7 @@ dmypy.json
 # Pyre type checker
 .pyre/
 # Pretrained model
-scatter_text_recognizer/weights/scatter-case-sensitive.pth
+scatter_text_recognizer/weights/*.pth
 craft_text_detector/weights/*.pth
 
 # Images
@@ -137,3 +137,9 @@ test_im/*
 1_original.jpg
 1_split.jpg
 result/*
+*.png
+*.jpg
+*.jpeg
+*.json
+*.zip
+    

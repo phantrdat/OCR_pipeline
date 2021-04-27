@@ -6,18 +6,23 @@ class Config:
 
         """ Config of detection module """
         self.craft_model ='./craft_text_detector/weights/craft_mlt_25k.pth'
-        self.craft_text_threshold=0.6
+        # self.craft_text_threshold=0.6
+        # self.craft_low_text=0.4
+        # self.craft_link_threshold=0.8
+        self.craft_text_threshold=0.7
         self.craft_low_text=0.4
-        self.craft_link_threshold=0.3
+        self.craft_link_threshold=0.4
         self.craft_canvas_size=1280
         self.craft_mag_ratio=1.0
         self.craft_poly=False
         # self.craft_show_time=False
         self.craft_refine=False
         self.craft_refiner_model='./craft_text_detector/weights/craft_refiner_CTW1500.pth'
-
         self.craft_padding_ratio = None # Extend detected boxes generated from CRAFT. Each box will be add "box_height/craft_padding_ratio" both sides
-        self.transform_type =  None #'dilation'
+        self.craft_split_vertically = True
+        self.box_type = 'polygon'
+        # self.transform_type =  'dilation' 
+        self.transform_type =  None 
         self.transform_kernel_size = (3,3)
 
         """ Config of recognition module """
@@ -36,5 +41,7 @@ class Config:
         self.scatter_rgb=False
         self.scatter_sensitive=True
         self.scatter_workers=4
-        self.scatter_model='./scatter_text_recognizer/weights/scatter-case-sensitive.pth'
+        # self.scatter_model='./scatter_text_recognizer/weights/scatter-case-sensitive-ori.pth'
+        self.scatter_model='./scatter_text_recognizer/weights/scatter-case-sensitive-retrain.pth'
+
         

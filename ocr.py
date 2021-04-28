@@ -274,7 +274,6 @@ class OCR:
 		
 		all_text = {}
 		coords = []
-		np.save('1.npy', polys)
 		for i in range(len(polys)):
 			# try:
 				pts = polys[i]

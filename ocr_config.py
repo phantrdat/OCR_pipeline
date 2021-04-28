@@ -20,7 +20,7 @@ class Config:
         self.craft_refiner_model='./craft_text_detector/weights/craft_refiner_CTW1500.pth'
         self.craft_padding_ratio = None # Extend detected boxes generated from CRAFT. Each box will be add "box_height/craft_padding_ratio" both sides
         self.craft_split_vertically = True
-        self.box_type = 'polygon'
+        self.box_type = 'rectangle'
         # self.transform_type =  'dilation' 
         self.transform_type =  None 
         self.transform_kernel_size = (3,3)

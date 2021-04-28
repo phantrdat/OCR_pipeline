@@ -275,7 +275,7 @@ class OCR:
 		all_text = {}
 		coords = []
 		for i in range(len(polys)):
-			# try:
+			try:
 				pts = polys[i]
 				rect = cv2.boundingRect(pts)
 				x,y,w,h = rect
@@ -304,8 +304,8 @@ class OCR:
 				cbb = f'{p1}-{p2}_{p3}-{p4}'
 				# cbb  = f'{x1}-{y1}_{x2}-{y2}'
 				all_text[cbb] = Image.fromarray(cropped_box)
-			# except Exception:
-			# 	pass
+			except Exception:
+				pass
 		pred_str, pred_conf = self.recognize(all_text)
 		json_list = []
 		for points, text, conf in zip(polys, pred_str, pred_conf):
@@ -409,7 +409,6 @@ class OCR:
 					split_im = image.copy()[final_horizontal_cut_lines[i]:final_horizontal_cut_lines[i+1], v_l[j]:v_l[j+1]]
 					
 					json_list = self.ocr(split_im)
-					# cv2.imwrite(f'temp/h_{final_horizontal_cut_lines[i]}{final_horizontal_cut_lines[i+1]}-w_{v_l[j]}{v_l[j+1]}.png', split_im)
 					for k in range(len(json_list)):
 						if v_l[j] !=None:
 							json_list[k]['x1'] += v_l[j]
@@ -546,7 +545,12 @@ class OCR:
 					sub_part, _ = self.split_text_vertically(part, s_length=s_length)
 					
 					marked.append((k, len(sub_part)))
-					parts.update(sub_part)
+					for k, v in sub_part.items():
+						while k in parts:
+							k = k + '_1'
+						parts[k] = v
+							
+					# parts.update(sub_part)
 			except:
 				pass
 		

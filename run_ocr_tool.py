@@ -138,17 +138,17 @@ if __name__ == '__main__':
 	ocr.load_net()
 
 
-	# parts ,score = ocr.split_text_vertically('./cut/011.png', s_length=7)
+	parts ,score = ocr.split_text_vertically('cut.png', s_length=7)
 	
-	# res = ocr.recognize(parts)
-	# print(res)
-	# print(''.join(res[0]))
+	res = ocr.recognize(parts)
+	print(res)
+	print(''.join(res[0]))
 
-	# x_name = [str(i) for i in range(len(score))]
-	# print(argrelextrema(np.array(score), np.less))
+	x_name = [str(i) for i in range(len(score))]
+	print(argrelextrema(np.array(score), np.less))
 
-	# plt.bar(x_name,score)
-	# plt.show()
+	plt.bar(x_name,score)
+	plt.show()
 
 
 

@@ -9,6 +9,11 @@ import math
 import time
 warnings.filterwarnings('ignore')
 
+# PK form setting
+MAX_WIDTH = 1024
+V_MERGE_THRESHOLD = 0.085
+H_MERGE_THRESHOLD = 0.02
+
 def distance(p1, p2, scale_x ,scale_y):
 	return math.sqrt(((p1[0]-p2[0])/scale_x)**2 + ((p1[1]-p2[1])/scale_y)**2)
 def is_merge(p1, p2, scale_x ,scale_y, threshold):
@@ -74,51 +79,6 @@ def join_line(line_parts, scale_x ,scale_y, threshold=0.03):
 		})
 	return merged_list
 		
-
-# def merge(all_parts, scale_x ,scale_y):
-	merged_parts = []
-	for lines in all_parts:
-		line_parts = []
-		for part in lines:
-			sorted_part = []
-			points = []
-
-			if len(part)==1:
-				sorted_part.extend(part)
-			elif len(part)>1:
-				for p in part:
-					x1,y1,x2,y2 = p['x1'],p['y1'],p['x2'],p['y2']
-					points.append([p['text'], [[x1,y1],[x2,y1],[x2,y2],[x1,y2]]])
-
-				points = sortBBox(points)
-				joined_lines = []
-				for each_line in points:
-					joined_lines+=each_line
-				points = joined_lines
-				
-				for pnt in points:
-						# print(pnt, part)
-					for p in part:
-						if pnt[0] == p['text'] and pnt[1] == [p['x1'], p['y1']]:
-							sorted_part.append(p)
-			if sorted_part!=[]:
-				min_x1 = min([p['x1'] for p in sorted_part])
-				min_y1 = min([p['y1'] for p in sorted_part])
-				min_x2 = max([p['x2'] for p in sorted_part])
-				min_y2 = max([p['y2'] for p in sorted_part])
-				text = ' '.join([p['text'] for p in sorted_part])
-				line_parts.append({
-					"text": text,
-					'x1': min_x1,
-					'y1': min_y1,
-					'x2': min_x2,
-					'y2': min_y2
-				})
-		if line_parts!=[]:
-			# line_parts = join_line(line_parts, scale_x ,scale_y)
-			merged_parts.append(line_parts)
-	
-	return merged_parts
 def match(text, list_keys):
 	if list_keys == []:
 		return False
@@ -220,23 +180,9 @@ def map_PK_form(merged_parts, scale_x, scale_y):
 		if tail!=None:
 			keys[i]['u_bound'] = tail['y1']
 		else:
-			keys[i]['u_bound'] = keys[i]['y2'] + int(0.6*(keys[i]['y2'] - keys[i]['y1']))
+			keys[i]['u_bound'] = keys[i]['y2'] + int(0.65*(keys[i]['y2'] - keys[i]['y1']))
 
-		# keys[i]['u_bound'] = keys[i+1]['y1']	
-		# keys[i]['l_bound'] = keys[i-1]['y2']
-		# keys[i]['u_bound'] = keys[i]['y2']
-			
-		# else:
-		# 	keys[i]['l_bound'] = keys[i-1]['y2']
-		# 	keys[i]['u_bound'] = keys[i+1]['y1']
-	
-	# avg_l_bound = [abs(k['y1']-k['l_bound']) for k in keys[1:-1]]
-	# avg_l_bound = sum(avg_l_bound)/len(avg_l_bound)
-	# avg_u_bound = [abs(k['y2']-k['u_bound']) for k in keys[1:-1]]
-	# avg_u_bound = sum(avg_u_bound)/len(avg_u_bound)
-
-	# keys[-1]['u_bound'] += int(0.3*(keys[-1]['y2'] - keys[-1]['y1']))
-	# keys[0]['l_bound'] -= int(0.3*(keys[0]['y2'] - keys[0]['y1']))
+		
 	
 			
 		
@@ -244,11 +190,11 @@ def map_PK_form(merged_parts, scale_x, scale_y):
 	
 	result = []
 	for k in keys:
-		values = [v for v in possible_values if v['y1']>k['l_bound'] and v['y2']< k['u_bound'] and v['x1']>k['x1'] and len(v['text'])>1]
+		values = [v for v in possible_values if v['y1']>=k['l_bound'] and v['y2']<= k['u_bound'] and v['x1']>=k['x1'] and len(v['text'])>1]
 		# values = sorted(enumerate(values), key=lambda x:x['x1'])
-		values = merge_PK_form(values, scale_x=scale_x, scale_y=scale_y, threshold=0.07, direction='vertical')
+		values = merge_PK_form(values, scale_x=scale_x, scale_y=scale_y, threshold=V_MERGE_THRESHOLD, direction='vertical')
 		# values = [v for v in possible_values if is_same_line(k, v) == True and v['x1']>k['x1'] and len(v['text'])>1]
-		same_line_keys = [k1 for k1 in keys if k1['y1']>k['l_bound'] and k1['y2']< k['u_bound'] and k!=k1 and len(k1['text'])>1]
+		same_line_keys = [k1 for k1 in keys if k1['y1']>=k['l_bound'] and k1['y2']<= k['u_bound'] and k!=k1 and len(k1['text'])>1]
 
 		if len(values) == 0:
 			result.append({'Key': k['text'], 'Value':''})
@@ -307,10 +253,6 @@ def is_near(text1, text2, scale_x, scale_y, threshold, direction):
 			text1 = text2
 			text2 = temp
 		dis = abs(text1['y1']- text2['y2'])/scale_y 
-		# pa1 = (text1['x1'], text1['y1'])
-		# pa2 = (text1['x2'], text1['y1'])
-		# pb1 = (text2['x1'], text2['y2'])
-		# pb2 = (text2['x2'], text2['y2'])
 		if dis <= threshold and  abs(text1['x1']- text2['x1'])/scale_x < threshold:
 			return True 
 	
@@ -384,25 +326,12 @@ if __name__ == '__main__':
 	ocr.load_net()
 
 
-	# for x in range(176):
-	# Use original version (no_split + craft + scatter)
-	# for x in os.listdir('bolt_seal'):
-	# 	try:
-	# 		image = f'bolt_seal/{x}' # or image = imgproc.loadImage('test_im/1.png')
-	# 		final_json_list= ocr.ocr(image)
-
-	# 		json.dump(final_json_list, open(f'json/{x[:-4]}.json','w'))
-
-	# 		image = ocr.plot(image, final_json_list)
-	# 		cv2.imwrite(f'result/{x}',image)
-	# 	except:
-	# 		pass
 
 
 	sub_folder = 'PK_form'
 	# images = sorted(os.listdir(f'test_im/{sub_folder}'))
-	# images = ['DSC05464.jpg']
-	images = ['nghieng_warped_warped.png', 'nghieng.png']
+	images = ['DSC05472.jpg']
+	# images = ['nghieng_warped_warped.png', 'nghieng.png']
 	for im in images:
 		for i in range(1):
 			t1 = time.time()
@@ -410,6 +339,11 @@ if __name__ == '__main__':
 			image_name = f'test_im/{sub_folder}/{im}'
 			image = cv2.imread(image_name)
 			h, w, _ = image.shape
+			if w > MAX_WIDTH: 
+				h, w = int((h*MAX_WIDTH)/w), MAX_WIDTH
+				image = cv2.resize(image, (w, h))
+
+			
 			image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
 			# json_list, all_parts,_,_ = ocr.ocr_with_split(image, h_slide= 5, v_slide=2)
@@ -421,7 +355,7 @@ if __name__ == '__main__':
 			# cv2.imwrite(f'1_{im}',image)
 
 			# image = cv2.imread(image_name)
-			json_list = merge_PK_form(json_list, scale_x=w, scale_y=h, threshold=0.02, direction='horizontal')
+			json_list = merge_PK_form(json_list, scale_x=w, scale_y=h, threshold=H_MERGE_THRESHOLD, direction='horizontal')
 			# image = ocr.plot(image, json_list)
 			# image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 			# cv2.imwrite(f'2_{im}',image)
@@ -441,10 +375,10 @@ if __name__ == '__main__':
 			for  r in res:
 				print (r)
 
-			image = cv2.imread(image_name)
-			image = ocr.plot(image, json_list)
-			image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-			cv2.imwrite(f'captcha_result/{im}',image)
+			# image = cv2.imread(image_name)
+			# image = ocr.plot(image, json_list)
+			# image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+			# cv2.imwrite(f'captcha_result/{im}',image)
 
 			print(time.time() - t1)
 

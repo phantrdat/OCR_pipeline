@@ -154,26 +154,38 @@ if __name__ == '__main__':
 
 	
 	sub_folder = 'resized_png'
+	# sub_folder = 'png'
 	idxs = sorted(os.listdir(f'test_im/{sub_folder}'))
 
-	# idxs = ['DSC05466']
-	# types = ['.png']
+	idxs = ['DSC06315']
+	types = ['.png']
 
-	types = [x[-4:] for x in idxs]
-	idxs = [x[:-4] for x in idxs]
-	running_times = []	
+	# types = [x[-4:] for x in idxs]
+	# idxs = [x[:-4] for x in idxs]
+	running_times = []
+	sizes = []
 	# idxs = ['009']
 	for z, im_idx in enumerate(tqdm(idxs)):
 			t1 = time.time()
 			image = f'test_im/{sub_folder}/{im_idx}{types[z]}' # or image = imgproc.loadImage('test_im/1.png')
+			print(image)
 			h, w, _ = cv2.imread(image).shape
+			sizes.append(f'{w}x{h}')
 
-			# json_list, _,_,_ = ocr.ocr_with_split(image, h_slide=10, v_slide=2)
-			json_list = ocr.ocr(image)
+			# json_list,_,_ = ocr.ocr_with_split(image, h_slide=10, v_slide=2)
 			
+			t1 = time.time()
+			json_list = ocr.ocr(image)
+			t2 = time.time()
+
+			print(t2-t1)
+
 			json_list = ocr.re_regconize(image, json_list)
-		
+
+			print(time.time()-t2)
+
 			running_times.append(time.time()-t1)
+
 
 			if ocr.cfg.transform_type!=None:
 				prefix = 'transform'
@@ -185,5 +197,6 @@ if __name__ == '__main__':
 
 			cv2.imwrite(f'result/{prefix}_{im_idx}.png',image)
 	
-	stat = pd.DataFrame({'Filename':idxs,'Running Time (No Split)':running_times})
-	stat.to_csv('run_DO_resized_no_split.csv', index=False)
+	stat = pd.DataFrame({'Filename':idxs, 'Size': sizes, 'Running Time (No Split)':running_times})
+	print(stat)
+	# stat.to_csv('run_DO_resized_no_split.csv', index=False)

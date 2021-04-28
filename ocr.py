@@ -82,8 +82,63 @@ class OCR:
 		print('loading pretrained model from %s' % self.cfg.scatter_model)
 		self.scatter.load_state_dict(torch.load(self.cfg.scatter_model, map_location=self.device))
 		self.scatter.eval()
+	def batch_detection(self, images, batch_size = 4):
+		
+		batch_images = []
+		for image in images:
+			if isinstance(image, str):
+				image = imgproc.loadImage(image)
+				batch_images.append(image)
+			else:
+				batch_images.append(image)
+		batch_ratios = []
+		batch_target_ratios = []
+		input_tensor = []
+		for image in batch_images:
+			img_resized, target_ratio, size_heatmap = imgproc.resize_aspect_ratio(image, self.cfg.craft_canvas_size,
+			 								interpolation=cv2.INTER_LINEAR, mag_ratio=self.cfg.craft_mag_ratio)
+			
+			batch_target_ratios.append(target_ratio)
+			ratio_h = ratio_w = 1 / target_ratio
 
-	def detection(self, image, is_rendered=False):
+			batch_ratios.append((ratio_h, ratio_w))
+			x = imgproc.normalizeMeanVariance(img_resized)
+			x = torch.from_numpy(x).permute(2, 0, 1)
+			print(x.shape)
+			input_tensor.append(x)
+		
+
+		input_tensor = torch.cat(input_tensor)
+
+		if self.cfg.cuda:
+			input_tensor = input_tensor.to(self.device)
+		
+		with torch.no_grad():
+			y, feature = self.craft(input_tensor) #CRAFT
+		
+		scores_text = y[:,:,:,0]
+		batch_boxes = []
+		batch_polys = []
+
+		for i in range(y.shape[0]):
+			score_text = y[i,:,:,0]
+			score_link = y[i,:,:,1]
+			boxes, polys = craft_utils.getDetBoxes(score_text, score_link, self.cfg.craft_text_threshold, self.cfg.craft_link_threshold,
+			self.cfg.craft_low_text, self.cfg.craft_poly)
+
+			ratio_w, ratio_h = batch_ratios[i]
+			boxes = craft_utils.adjustResultCoordinates(boxes, ratio_w, ratio_h)
+			polys = craft_utils.adjustResultCoordinates(polys, ratio_w, ratio_h)
+			for k in range(len(polys)):
+				if polys[k] is None: polys[k] = boxes[k]
+			batch_boxes.append(boxes)
+			batch_polys.append(polys)
+		return batch_boxes, batch_polys, scores_text, batch_target_ratios
+		
+
+		
+	
+	def detection(self, image):
 		if isinstance(image, str):
 			image = imgproc.loadImage(image)
 		t0 = time.time()
@@ -114,8 +169,6 @@ class OCR:
 				y_refiner = self.refine_net(y, feature)
 			score_link = y_refiner[0,:,:,0].cpu().data.numpy()
 
-		t0 = time.time() - t0
-		t1 = time.time()
 
 		# Post-processing
 		boxes, polys = craft_utils.getDetBoxes(score_text, score_link, self.cfg.craft_text_threshold, self.cfg.craft_link_threshold,
@@ -127,16 +180,6 @@ class OCR:
 		for k in range(len(polys)):
 			if polys[k] is None: polys[k] = boxes[k]
 
-		t1 = time.time() - t1
-
-		# render results (optional)
-		ret_score_text = None
-		if is_rendered !=False:
-			render_img = score_text.copy()
-			render_img = np.hstack((render_img, score_link))
-			# ret_score_text = imgproc.cvt2HeatmapImg(render_img)
-		
-		# print("\ninfer/postproc time : {:.3f}/{:.3f}".format(t0, t1))
 		return boxes, polys, score_text, target_ratio
 	def recognize(self, textbb_dict):
 
@@ -204,14 +247,25 @@ class OCR:
 				final_preds.extend(all_block_preds.tolist())
 
 		return final_preds, final_conf
+	def batch_ocr(self, images):
+		batch_images = []
+		for image in images:
+			if isinstance(image, str):
+				image = imgproc.loadImage(image)
+				batch_images.append(image)
+			else:
+				batch_images.append(image)
+		
+		batch_bboxes, batch_polys, score_text, target_ratio = self.batch_detection(batch_images)
 
+
+		
 	def ocr(self, image):
 		if isinstance(image, str):
 			image = imgproc.loadImage(image)
 		if self.cfg.transform_type == "dilation":
 			kernel = np.ones(self.cfg.transform_kernel_size,np.uint8)
-			# kernel = np.random.choice([0,1], size=self.cfg.transform_kernel_size).astype(np.uint8)
-			transformed_image = cv2.dilate(1- kernel, kernel, iterations = 1)
+			transformed_image = cv2.dilate(1 - kernel, kernel, iterations = 1)
 		else:
 			transformed_image = image.copy()
 		bboxes, polys, score_text, target_ratio = self.detection(transformed_image)
@@ -221,17 +275,12 @@ class OCR:
 		all_text = {}
 		coords = []
 		np.save('1.npy', polys)
-		for i  in range(len(polys)):
+		for i in range(len(polys)):
 			# try:
 				pts = polys[i]
 				rect = cv2.boundingRect(pts)
 				x,y,w,h = rect
-				# x1 = int(min([p[0] for p in pts]))
-				# y1 = int(min([p[1] for p in pts]))
-				# x2 = int(max([p[0] for p in pts]))
-				# y2 = int(max([p[1] for p in pts]))
-				# w = abs(x2 - x1)
-				# h = abs(y2 - y1)
+
 				x, y, w, h = max(x,0), max(y,0), max(w,0), max(h,0)
 				
 				if self.cfg.craft_padding_ratio != None:
@@ -249,8 +298,6 @@ class OCR:
 				# cropped_box = clone[y:y+h, x:x+w].copy()
 				cropped_box = cv2.cvtColor(cropped_box, cv2.COLOR_RGB2BGR) 
 
-				# cropped_box = cv2.erode(cropped_box, (5,5),iterations = 3)
-				# cv2.imwrite(f'{str(random.randint(1,100))}.png', cropped_box)
 				p1 = max(0,int(pts[0][0])) 
 				p2 = max(0,int(pts[0][1]))
 				p3 = max(0,int(pts[2][0])) 
@@ -346,7 +393,8 @@ class OCR:
 			vertical_cut_lines.append([int(c*2*(1/target_ratio)) for c in vertical_patch_cut_lines])
 		
 		final_json_list = []
-		all_parts_json = []
+		# all_parts_json = []
+
 		for i in range(0, len(final_horizontal_cut_lines)-1):
 
 			line_parts = []
@@ -360,6 +408,7 @@ class OCR:
 				json_list = []
 				try:
 					split_im = image.copy()[final_horizontal_cut_lines[i]:final_horizontal_cut_lines[i+1], v_l[j]:v_l[j+1]]
+					
 					json_list = self.ocr(split_im)
 					# cv2.imwrite(f'temp/h_{final_horizontal_cut_lines[i]}{final_horizontal_cut_lines[i+1]}-w_{v_l[j]}{v_l[j+1]}.png', split_im)
 					for k in range(len(json_list)):
@@ -372,11 +421,52 @@ class OCR:
 				except:
 					pass
 				final_json_list.extend(json_list)
-				line_parts.append(json_list)
+				# line_parts.append(json_list)
 				
-			all_parts_json.append(line_parts)
+			# all_parts_json.append(line_parts)
+
+		# Method 2 
+
+		# final_json_list = []
+		# split_images = []
+		# for i in range(0, len(final_horizontal_cut_lines)-1):
+
+		# 	if self.cfg.craft_split_vertically:
+		# 		v_l = vertical_cut_lines[i]
+		# 	else:
+		# 		v_l = [None, None]
+		# 	if len(v_l)==0:
+		# 		v_l = [0, im_width]
+		# 	for j in range(len(v_l)-1):
+		# 		json_list = []
+		# 		try:
+		# 			split_im = image.copy()[final_horizontal_cut_lines[i]:final_horizontal_cut_lines[i+1], v_l[j]:v_l[j+1]]
+		# 			split_data = {'x_shift': v_l[j], 'y_shift': final_horizontal_cut_lines[i], 'data': split_im}
+		# 			split_images.append(split_data)
+
+		# 			# json_list = self.ocr(split_im)
+		# 			# cv2.imwrite(f'temp/h_{final_horizontal_cut_lines[i]}{final_horizontal_cut_lines[i+1]}-w_{v_l[j]}{v_l[j+1]}.png', split_im)
+		# 			# for k in range(len(json_list)):
+		# 			# 	if v_l[j] !=None:
+		# 			# 		json_list[k]['x1'] += v_l[j]
+		# 			# 		json_list[k]['x2'] += v_l[j]
+
+		# 			# 	json_list[k]['y1'] += final_horizontal_cut_lines[i]
+		# 			# 	json_list[k]['y2'] += final_horizontal_cut_lines[i]
+		# 		except:
+		# 			pass
 		
-		return final_json_list, all_parts_json, final_horizontal_cut_lines, vertical_cut_lines
+		
+		# self.batch_detection([x['data'] for x in split_images])
+
+		
+
+
+
+
+		return final_json_list, final_horizontal_cut_lines, vertical_cut_lines
+		
+		# return final_json_list, all_parts_json, final_horizontal_cut_lines, vertical_cut_lines
 	
 
 
@@ -435,7 +525,6 @@ class OCR:
 				split_im = image.copy()[:, final_vertical_cut_lines[i]:final_vertical_cut_lines[i+1]]
 				coor_key = '-'.join([str(final_vertical_cut_lines[i]), str(final_vertical_cut_lines[i+1])])
 				textbb_dict[coor_key] = Image.fromarray(split_im)
-				cv2.imwrite(f'temp/{str(i)}.png', split_im)
 			except:
 				pass
 
@@ -444,7 +533,8 @@ class OCR:
 	def re_regconize(self, image, json_list, min_inp_confidence = 0.5, s_length = 7, max_length = 30, min_out_confidence = 0.8):
 		if isinstance(image, str):
 			image = imgproc.loadImage(image)
-		results = []		
+		marked = []	
+		parts = {}	
 		for k, box in enumerate(json_list):
 			
 			try:
@@ -455,21 +545,28 @@ class OCR:
 					else:
 						part = image[box['y1']:box['y2'], box['x1']:box['x2']].copy()
 					sub_part, _ = self.split_text_vertically(part, s_length=s_length)
-					reg_res = self.recognize(sub_part)
-
-					# Update recognize result
-					# if sum(reg_res[1])/len(reg_res[1]) > json_list[k]['confdt']:
-					parts_of_text = []
-					confdts_of_text = []
-					for i in range(len(reg_res[0])):
-						if reg_res[1][i] > min_out_confidence:
-							parts_of_text.append(reg_res[0][i])
-							confdts_of_text.append(reg_res[1][i])
-
-					json_list[k]['text'] = ''.join(parts_of_text)
-					json_list[k]['confdt'] = sum(confdts_of_text)/len(confdts_of_text)
+					
+					marked.append((k, len(sub_part)))
+					parts.update(sub_part)
 			except:
 				pass
+		
+		reg_res = self.recognize(parts)
+		# Update recognize result
+		ptr = 0
+		for (idx, L) in marked:
+			parts_of_text = []
+			confdts_of_text = []
+			res = reg_res[0][ptr:ptr+L]
+			confident = reg_res[1][ptr:ptr+L]
+			for j, sub_text in enumerate(res):
+				if confident[j] > min_out_confidence:
+					parts_of_text.append(sub_text)
+					confdts_of_text.append(confident[j])
+			json_list[idx]['text'] = ''.join(parts_of_text)
+			if confdts_of_text!=[]:
+				json_list[idx]['confdt'] = sum(confdts_of_text)/len(confdts_of_text)
+			ptr+=L
 		return json_list
 
 	def plot(self, image, json_list, color=(178,74,74), line_thickness=1):

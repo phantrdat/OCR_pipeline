@@ -165,7 +165,20 @@ class OCR:
         score_text = y[0, :, :, 0]
         score_link = y[0, :, :, 1]
         t1 = time.time()
-        print(f"\tDet forward and get res: {t1 - t0}")
+        print(f"\tDet TRT forward and get res: {t1 - t0}")
+
+        # x = Variable(torch.from_numpy(x))
+        # if self.cfg.cuda:
+            # x = x.to(self.device)
+
+        # t0 = time.time()
+        # # forward pass
+        # with torch.no_grad():
+            # y_, feature = self.craft(x) #CRAFT
+        # score_text_ = y_[0,:,:,0].cpu().data.numpy()
+        # score_link_ = y_[0,:,:,1].cpu().data.numpy()
+        # t1 = time.time()
+        # print(f"\tDet TORCH forward and get res: {t1 - t0}")
 
         # Assert result
         # np.testing.assert_allclose(y.cpu().data.numpy(), y_, rtol=1e-2, atol=0)
@@ -175,8 +188,9 @@ class OCR:
             # with torch.no_grad():
                 # y_refiner = self.refine_net(y, feature)
             # score_link = y_refiner[0, :, :, 0].cpu().data.numpy()
-        t0 = time.time()
+
         # Post-processing
+        t0 = time.time()
         boxes, polys = craft_utils.getDetBoxes(score_text, score_link, self.cfg.craft_text_threshold, self.cfg.craft_link_threshold,
                                                self.cfg.craft_low_text, self.cfg.craft_poly)
 
@@ -186,9 +200,8 @@ class OCR:
         for k in range(len(polys)):
             if polys[k] is None:
                 polys[k] = boxes[k]
-
         t1 = time.time()
-        print(f"\tDet post: {t1 - t0}")
+        print(f"\tDet post total: {t1 - t0}")
         return boxes, polys, score_text, target_ratio
 
     def recognize(self, textbb_dict):

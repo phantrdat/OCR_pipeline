@@ -8,6 +8,7 @@ import torch
 import torch.backends.cudnn as cudnn
 from torch.autograd import Variable
 import torch.nn.functional as F
+import torchvision.transforms as transforms
 from PIL import Image
 import cv2
 # from skimage import io
@@ -24,12 +25,14 @@ from ocr_utils import copyStateDict, plot_one_box, Params, four_point_transform
 import tensorrt as trt
 import pycuda.autoinit
 import pycuda.driver as cuda
+from joblib import Parallel, delayed, cpu_count
 
 
 class OCR:
     def __init__(self, cfg):
         self.cfg = cfg
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.toTensor = transforms.ToTensor()
 
     def load_net(self):
         """ Loading detection network"""
@@ -145,7 +148,7 @@ class OCR:
                                                                    interpolation=cv2.INTER_LINEAR, mag_ratio=self.cfg.craft_mag_ratio)
         ratio_h = ratio_w = 1 / target_ratio
 
-        # preprocessing
+        # Pre-processing
         x = imgproc.normalizeMeanVariance(img_resized)
         x = np.transpose(x, (2, 0, 1))
         x = np.expand_dims(x, axis=0)
@@ -154,7 +157,6 @@ class OCR:
         t1 = time.time()
         print(f"\tDet pre: {t1 - t0}")
 
-        # print(f"\tInput shape: {x.shape}")
         # Do inference and reshape result
         t0 = time.time()
         y = self.do_craft_trt_inference(x)
@@ -165,23 +167,7 @@ class OCR:
         score_text = y[0, :, :, 0]
         score_link = y[0, :, :, 1]
         t1 = time.time()
-        print(f"\tDet TRT forward and get res: {t1 - t0}")
-
-        # x = Variable(torch.from_numpy(x))
-        # if self.cfg.cuda:
-            # x = x.to(self.device)
-
-        # t0 = time.time()
-        # # forward pass
-        # with torch.no_grad():
-            # y_, feature = self.craft(x) #CRAFT
-        # score_text_ = y_[0,:,:,0].cpu().data.numpy()
-        # score_link_ = y_[0,:,:,1].cpu().data.numpy()
-        # t1 = time.time()
-        # print(f"\tDet TORCH forward and get res: {t1 - t0}")
-
-        # Assert result
-        # np.testing.assert_allclose(y.cpu().data.numpy(), y_, rtol=1e-2, atol=0)
+        print(f"\tDet TRT forward: {t1 - t0}")
 
         # # refine link
         # if self.refine_net is not None:
@@ -204,69 +190,95 @@ class OCR:
         print(f"\tDet post total: {t1 - t0}")
         return boxes, polys, score_text, target_ratio
 
-    def recognize(self, textbb_dict):
-        data = StreamDataset(self.scatter_params, textbb_dict)  # use StreamDataset
-        loader = torch.utils.data.DataLoader(
-            data, batch_size=self.scatter_params.batch_size,
-            shuffle=False,
-            num_workers=int(self.scatter_params.workers),
-            collate_fn=self.align_collate, pin_memory=True)
+    def scatter_pre_process(self, pts, clone, tensors):
+        rect = cv2.boundingRect(pts)
+        x, y, w, h = rect
+        x, y, w, h = max(x, 0), max(y, 0), max(w, 0), max(h, 0)
 
-        # predict
+        cropped_box = four_point_transform(clone, pts)
+        cropped_box = cv2.cvtColor(cropped_box, cv2.COLOR_RGB2BGR)
+        img = Image.fromarray(cropped_box)
+        if self.scatter_params.rgb:
+            img = img.convert('RGB')  # for color image
+        else:
+            img = img.convert('L')
+        img = img.resize((self.scatter_params.imgW, self.scatter_params.imgH), Image.BICUBIC)
+        img = self.toTensor(img)
+        img.sub_(0.5).div_(0.5)
+        tensors.append(img)
+        return
+
+    def scatter_post_process(self, preds, all_block_preds, all_confidence_scores):
+        confidence_score_list = []
+        pred_str_list = []
+
+        # select max probability (greedy decoding) then decode index to character
+        _, preds_index = preds.max(2)
+        preds_str = self.scatter_converter.decode(preds_index)
+
+        preds_prob = F.softmax(preds, dim=2)
+        preds_max_prob, _ = preds_prob.max(dim=2)
+        for pred, pred_max_prob in zip(preds_str, preds_max_prob):
+            pred_EOS = pred.find('[s]')
+            pred = pred[:pred_EOS]  # prune after "end of sentence" token ([s])
+            pred_str_list.append(pred)
+            pred_max_prob = pred_max_prob[:pred_EOS]
+
+            # calculate confidence score (= multiply of pred_max_prob)
+            try:
+                confidence_score = pred_max_prob.cumprod(dim=0)[-1].cpu().numpy()
+            except:
+                confidence_score = 0  # for empty pred case, when prune after "end of sentence" token ([s])
+            confidence_score_list.append(confidence_score)
+
+        all_block_preds.append(pred_str_list)
+        all_confidence_scores.append(confidence_score_list)
+        return
+
+    def recognize(self, image, polys):
+        # Pre-processing
+        t0 = time.time()
+        clone = image[:, :, ::-1].copy()
+        image_tensors = []
+        jl_parallel = Parallel(n_jobs=1, prefer="threads", batch_size=1)
+        jl_parallel(delayed(self.scatter_pre_process)(pts, clone, image_tensors) for pts in polys)
+        image_tensors = torch.cat([t.unsqueeze(0) for t in image_tensors], 0)
         final_preds = []
         final_conf = []
+        all_block_preds = []
+        all_confidence_scores = []
+        batch_size = image_tensors.size(0)
+        image_tensors = image_tensors.to(self.device)
+        text_for_pred = torch.LongTensor(batch_size, self.scatter_params.batch_max_length + 1).fill_(0).to(self.device)
+        t1 = time.time()
+        print(f"\tRec pre: {t1 - t0}")
+
+        # Forward
+        t0 = time.time()
         with torch.no_grad():
-            for image_tensors, _ in loader:
-                all_block_preds = []
-                all_confidence_scores = []
-                batch_size = image_tensors.size(0)
-                image = image_tensors.to(self.device)
-                # For max length prediction
-                length_for_pred = torch.IntTensor([self.scatter_params.batch_max_length] * batch_size).to(self.device)
-                text_for_pred = torch.LongTensor(batch_size, self.scatter_params.batch_max_length + 1).fill_(0).to(self.device)
+            predss = self.scatter(image_tensors, text_for_pred, is_train=False)[0]
+        t1 = time.time()
+        print(f"\tRec infer: {t1 - t0}")
 
-                predss = self.scatter(image, text_for_pred, is_train=False)[0]
+        # Post-processing
+        t0 = time.time()
+        jl_parallel = Parallel(n_jobs=2, prefer="threads", batch_size=2)
+        jl_parallel(delayed(self.scatter_post_process)(preds, all_block_preds, all_confidence_scores) for preds in predss)
 
-                # for i, preds in enumerate(predss):
-                for preds in predss:
-                    confidence_score_list = []
-                    pred_str_list = []
+        all_confidence_scores = np.array(all_confidence_scores)
+        all_block_preds = np.array(all_block_preds)
 
-                    # select max probability (greedy decoding) then decode index to character
-                    _, preds_index = preds.max(2)
-                    preds_str = self.scatter_converter.decode(preds_index, length_for_pred)
+        best_pred_index = np.argmax(all_confidence_scores, axis=0)
+        best_pred_index = np.expand_dims(best_pred_index, axis=0)
 
-                    preds_prob = F.softmax(preds, dim=2)
-                    preds_max_prob, _ = preds_prob.max(dim=2)
-                    for pred, pred_max_prob in zip(preds_str, preds_max_prob):
-                        pred_EOS = pred.find('[s]')
-                        pred = pred[:pred_EOS]  # prune after "end of sentence" token ([s])
-                        pred_str_list.append(pred)
-                        pred_max_prob = pred_max_prob[:pred_EOS]
+        # Get max predition per image through blocks
+        all_block_preds = np.take_along_axis(all_block_preds, best_pred_index, axis=0)[0]
+        all_confidence_scores = np.take_along_axis(all_confidence_scores, best_pred_index, axis=0)[0]
 
-                        # calculate confidence score (= multiply of pred_max_prob)
-                        try:
-                            confidence_score = pred_max_prob.cumprod(dim=0)[-1].cpu().numpy()
-                        except:
-                            confidence_score = 0  # for empty pred case, when prune after "end of sentence" token ([s])
-                        confidence_score_list.append(confidence_score)
-
-                    all_block_preds.append(pred_str_list)
-                    all_confidence_scores.append(confidence_score_list)
-
-                all_confidence_scores = np.array(all_confidence_scores)
-                all_block_preds = np.array(all_block_preds)
-
-                best_pred_index = np.argmax(all_confidence_scores, axis=0)
-                best_pred_index = np.expand_dims(best_pred_index, axis=0)
-
-                # Get max predition per image through blocks
-                all_block_preds = np.take_along_axis(all_block_preds, best_pred_index, axis=0)[0]
-                all_confidence_scores = np.take_along_axis(all_confidence_scores, best_pred_index, axis=0)[0]
-
-                final_conf.extend(all_confidence_scores.tolist())
-                final_preds.extend(all_block_preds.tolist())
-
+        final_conf.extend(all_confidence_scores.tolist())
+        final_preds.extend(all_block_preds.tolist())
+        t1 = time.time()
+        print(f"\tRec post: {t1 - t0}")
         return final_preds, final_conf
 
     def ocr(self, image):
@@ -285,30 +297,8 @@ class OCR:
         _, polys, _, _ = self.detection(transformed_image)
         t1 = time.time()
         print(f"Detection total: {t1 - t0}")
-
         t0 = time.time()
-        raw_img = image[:, :, ::-1]
-        clone = raw_img.copy()
-        all_text = {}
-        for i in range(len(polys)):
-            pts = polys[i]
-            rect = cv2.boundingRect(pts)
-            x, y, w, h = rect
-            x, y, w, h = max(x, 0), max(y, 0), max(w, 0), max(h, 0)
-
-            cropped_box = four_point_transform(clone, pts)
-            cropped_box = cv2.cvtColor(cropped_box, cv2.COLOR_RGB2BGR)
-
-            p1 = max(0, int(pts[0][0]))
-            p2 = max(0, int(pts[0][1]))
-            p3 = max(0, int(pts[2][0]))
-            p4 = max(0, int(pts[2][1]))
-            cbb = f'{p1}-{p2}_{p3}-{p4}'
-            all_text[cbb] = Image.fromarray(cropped_box)
-        t1 = time.time()
-        print(f"\tPre Recog: {t1 - t0}")
-        t0 = time.time()
-        pred_str, pred_conf = self.recognize(all_text)
+        pred_str, pred_conf = self.recognize(image, polys)
         t1 = time.time()
         print(f"Recognition total: {t1 - t0}")
         t0 = time.time()

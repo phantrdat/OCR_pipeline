@@ -93,13 +93,15 @@ class AttnLabelConverter(object):
             batch_text[i][1:1 + len(text)] = torch.LongTensor(text)  # batch_text[:, 0] = [GO] token
         return (batch_text.to(device), torch.IntTensor(length).to(device))
 
-    def decode(self, text_index, length):
+    # def decode(self, text_index, length):
+    def decode(self, text_index):
         """ convert text-index into text-label. """
-        texts = []
-        for index, l in enumerate(length):
-            text = ''.join([self.character[i] for i in text_index[index, :]])
-            texts.append(text)
-        return texts
+        return [''.join([self.character[i] for i in text_index[index, :]]) for index in range(text_index.shape[0])]
+        # texts = []
+        # for index, l in enumerate(length):
+            # text = ''.join([self.character[i] for i in text_index[index, :]])
+            # texts.append(text)
+        # return texts
 
 class TransLabelConverter(object):
     """ Convert between text-label and text-index """

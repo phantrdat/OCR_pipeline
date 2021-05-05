@@ -140,20 +140,35 @@ class OCR:
 
         return h_output_y
 
-    def detection(self, image, is_rendered=False):
-        t0 = time.time()
-
-        # resize
+    def craft_pre_process(self, image):
+        # Resize
         img_resized, target_ratio, _ = imgproc.resize_aspect_ratio(image, self.cfg.craft_canvas_size,
                                                                    interpolation=cv2.INTER_LINEAR, mag_ratio=self.cfg.craft_mag_ratio)
-        ratio_h = ratio_w = 1 / target_ratio
-
-        # Pre-processing
+        # Normalize and transpose
         x = imgproc.normalizeMeanVariance(img_resized)
         x = np.transpose(x, (2, 0, 1))
         x = np.expand_dims(x, axis=0)
         x = np.ascontiguousarray(x)
+        return x, target_ratio
 
+    def craft_post_process(self, score_text, score_link, ratio_w, ratio_h):
+        # Get detection boxes
+        boxes, polys = craft_utils.getDetBoxes(score_text, score_link, self.cfg.craft_text_threshold, self.cfg.craft_link_threshold,
+                                               self.cfg.craft_low_text, self.cfg.craft_poly)
+
+        # Coordinate adjustment
+        boxes = craft_utils.adjustResultCoordinates(boxes, ratio_w, ratio_h)
+        polys = craft_utils.adjustResultCoordinates(polys, ratio_w, ratio_h)
+        for k in range(len(polys)):
+            if polys[k] is None:
+                polys[k] = boxes[k]
+        return boxes, polys
+
+    # def detection(self, image, is_rendered=False):
+    def detection(self, image):
+        t0 = time.time()
+        x, target_ratio = self.craft_pre_process(image)
+        ratio_h = ratio_w = 1 / target_ratio
         t1 = time.time()
         print(f"\tDet pre: {t1 - t0}")
 
@@ -177,15 +192,7 @@ class OCR:
 
         # Post-processing
         t0 = time.time()
-        boxes, polys = craft_utils.getDetBoxes(score_text, score_link, self.cfg.craft_text_threshold, self.cfg.craft_link_threshold,
-                                               self.cfg.craft_low_text, self.cfg.craft_poly)
-
-        # coordinate adjustment
-        boxes = craft_utils.adjustResultCoordinates(boxes, ratio_w, ratio_h)
-        polys = craft_utils.adjustResultCoordinates(polys, ratio_w, ratio_h)
-        for k in range(len(polys)):
-            if polys[k] is None:
-                polys[k] = boxes[k]
+        boxes, polys = self.craft_post_process(score_text, score_link, ratio_w, ratio_h)
         t1 = time.time()
         print(f"\tDet post total: {t1 - t0}")
         return boxes, polys, score_text, target_ratio
@@ -208,32 +215,55 @@ class OCR:
         tensors.append(img)
         return
 
-    def scatter_post_process(self, preds, all_block_preds, all_confidence_scores):
-        confidence_score_list = []
-        pred_str_list = []
+    def scatter_post_process(self, predss):
+        def get_all_preds_and_scores(preds, all_block_preds, all_confidence_scores):
+            confidence_score_list = []
+            pred_str_list = []
 
-        # select max probability (greedy decoding) then decode index to character
-        _, preds_index = preds.max(2)
-        preds_str = self.scatter_converter.decode(preds_index)
+            # select max probability (greedy decoding) then decode index to character
+            _, preds_index = preds.max(2)
+            preds_index = preds_index.cpu().numpy()
+            preds_str = self.scatter_converter.decode(preds_index)
+            preds_prob = F.softmax(preds, dim=2)
+            preds_max_prob, _ = preds_prob.max(dim=2)
 
-        preds_prob = F.softmax(preds, dim=2)
-        preds_max_prob, _ = preds_prob.max(dim=2)
-        for pred, pred_max_prob in zip(preds_str, preds_max_prob):
-            pred_EOS = pred.find('[s]')
-            pred = pred[:pred_EOS]  # prune after "end of sentence" token ([s])
-            pred_str_list.append(pred)
-            pred_max_prob = pred_max_prob[:pred_EOS]
+            for pred, pred_max_prob in zip(preds_str, preds_max_prob):
+                pred_EOS = pred.find('[s]')
+                pred = pred[:pred_EOS]  # prune after "end of sentence" token ([s])
+                pred_str_list.append(pred)
+                pred_max_prob = pred_max_prob[:pred_EOS]
 
-            # calculate confidence score (= multiply of pred_max_prob)
-            try:
-                confidence_score = pred_max_prob.cumprod(dim=0)[-1].cpu().numpy()
-            except:
-                confidence_score = 0  # for empty pred case, when prune after "end of sentence" token ([s])
-            confidence_score_list.append(confidence_score)
+                # calculate confidence score (= multiply of pred_max_prob)
+                try:
+                    confidence_score = pred_max_prob.cumprod(dim=0)[-1].cpu().numpy()
+                except:
+                    confidence_score = 0  # for empty pred case, when prune after "end of sentence" token ([s])
+                confidence_score_list.append(confidence_score)
 
-        all_block_preds.append(pred_str_list)
-        all_confidence_scores.append(confidence_score_list)
-        return
+            all_block_preds.append(pred_str_list)
+            all_confidence_scores.append(confidence_score_list)
+            return
+
+        final_preds = []
+        final_conf = []
+        all_block_preds = []
+        all_confidence_scores = []
+        jl_parallel = Parallel(n_jobs=len(predss), prefer="threads", batch_size=len(predss))
+        jl_parallel(delayed(get_all_preds_and_scores)(preds, all_block_preds, all_confidence_scores) for preds in predss)
+
+        all_confidence_scores = np.array(all_confidence_scores)
+        all_block_preds = np.array(all_block_preds)
+
+        best_pred_index = np.argmax(all_confidence_scores, axis=0)
+        best_pred_index = np.expand_dims(best_pred_index, axis=0)
+
+        # Get max predition per image through blocks
+        all_block_preds = np.take_along_axis(all_block_preds, best_pred_index, axis=0)[0]
+        all_confidence_scores = np.take_along_axis(all_confidence_scores, best_pred_index, axis=0)[0]
+
+        final_conf.extend(all_confidence_scores.tolist())
+        final_preds.extend(all_block_preds.tolist())
+        return final_preds, final_conf
 
     def recognize(self, image, polys):
         # Pre-processing
@@ -243,10 +273,6 @@ class OCR:
         jl_parallel = Parallel(n_jobs=1, prefer="threads", batch_size=1)
         jl_parallel(delayed(self.scatter_pre_process)(pts, clone, image_tensors) for pts in polys)
         image_tensors = torch.cat([t.unsqueeze(0) for t in image_tensors], 0)
-        final_preds = []
-        final_conf = []
-        all_block_preds = []
-        all_confidence_scores = []
         batch_size = image_tensors.size(0)
         image_tensors = image_tensors.to(self.device)
         text_for_pred = torch.LongTensor(batch_size, self.scatter_params.batch_max_length + 1).fill_(0).to(self.device)
@@ -262,21 +288,7 @@ class OCR:
 
         # Post-processing
         t0 = time.time()
-        jl_parallel = Parallel(n_jobs=2, prefer="threads", batch_size=2)
-        jl_parallel(delayed(self.scatter_post_process)(preds, all_block_preds, all_confidence_scores) for preds in predss)
-
-        all_confidence_scores = np.array(all_confidence_scores)
-        all_block_preds = np.array(all_block_preds)
-
-        best_pred_index = np.argmax(all_confidence_scores, axis=0)
-        best_pred_index = np.expand_dims(best_pred_index, axis=0)
-
-        # Get max predition per image through blocks
-        all_block_preds = np.take_along_axis(all_block_preds, best_pred_index, axis=0)[0]
-        all_confidence_scores = np.take_along_axis(all_confidence_scores, best_pred_index, axis=0)[0]
-
-        final_conf.extend(all_confidence_scores.tolist())
-        final_preds.extend(all_block_preds.tolist())
+        final_preds, final_conf = self.scatter_post_process(predss)
         t1 = time.time()
         print(f"\tRec post: {t1 - t0}")
         return final_preds, final_conf

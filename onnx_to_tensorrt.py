@@ -9,7 +9,9 @@ def build_engine(args, onnx_file_path, engine_file_path):
         # builder params
         builder.max_workspace_size = 1 << 30  # 1GB
         builder.max_batch_size = args.batch_size
-        builder.fp16_mode = builder.platform_has_fast_fp16
+        if args.use_fp16 and builder.platform_has_fast_fp16:
+            print('Using FP16 precision')
+            builder.fp16_mode = True
         # builder.int8_mode = builder.platform_has_fast_int8
 
         config = None
@@ -53,24 +55,15 @@ if __name__ == '__main__':
     parser.add_argument(
         '-t', '--type', default='craft', type=str)
     parser.add_argument(
-        '--craft_onnx', default='craft_text_detector/weights/craft_mlt_25k_da.onnx', type=str)
-    parser.add_argument(
-        '--arc_onnx', default='../weights/onnx/arc/ir50_asia-l2norm-b1.onnx', type=str)
+        '--craft_onnx', default='craft_text_detector/weights/craft_mlt_25k.onnx', type=str)
     parser.add_argument('-b', '--batch_size', type=int, default=1)
-    parser.add_argument('--craft_width', type=int, default=768)
-    parser.add_argument('--craft_height', type=int, default=768)
-    parser.add_argument('--arc_width', type=int, default=112)
-    parser.add_argument('--arc_height', type=int, default=112)
+    parser.add_argument('--use_fp16', action="store_true", default=False)
     args = parser.parse_args()
 
     TRT_LOGGER = trt.Logger()
     EXPLICIT_BATCH = 1 << (int)(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
 
-    if args.type == 'arc':
-        # INPUT_SIZE = [args.batch_size, 3, args.arc_height, args.arc_width]
-        onnx_file_path = args.arc_onnx
-    elif args.type == 'craft':
-        # INPUT_SIZE = [args.batch_size, 3, args.craft_height, args.craft_width]
+    if args.type == 'craft':
         onnx_file_path = args.craft_onnx
     else:
         raise Exception("NOT IMPLEMENTED")

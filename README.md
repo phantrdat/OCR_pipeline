@@ -5,6 +5,10 @@
 - Download SCATTER weights: [SCATTER](https://drive.google.com/drive/u/1/folders/1niuPM6otpSQFSai8Ft2bO0lhdqEjE96Z)
 - Put SCATTER weight (scatter-case-sensitive.pth) in: scatter_scatter_text_recognizer/weights. More details about this model can be found [here](https://github.com/phantrdat/cvpr20-scatter-text-recognizer)
 
+## Torch to TensorRT
+- Torch to ONNX: `python torch_to_onnx.py`
+- ONNX to TensorRT: `python onnx_to_tensorrt.py`
+
 ## Usage
 Check in main.py for usage.
 

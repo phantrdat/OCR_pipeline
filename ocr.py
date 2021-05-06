@@ -1,32 +1,23 @@
-# import sys
-# import os
-import time
-# import argparse
-from scipy.signal import argrelextrema
 import torch
-# import torch.nn as nn
-import torch.backends.cudnn as cudnn
 from torch.autograd import Variable
 import torch.nn.functional as F
 import torchvision.transforms as transforms
 from PIL import Image
 import cv2
-# from skimage import io
 import numpy as np
-# from tqdm import tqdm
 import more_itertools as mit
 import string
-from craft_text_detector import *
-from scatter_text_recognizer import *
-from ocr_utils import copyStateDict, plot_one_box, Params, four_point_transform
-# import random
-# from matplotlib import pyplot as plt
+from scipy.signal import argrelextrema
 
 import tensorrt as trt
 import pycuda.autoinit
 import pycuda.driver as cuda
-from joblib import Parallel, delayed, cpu_count
+from joblib import Parallel, delayed
+import time
 
+from craft_text_detector import *
+from scatter_text_recognizer import *
+from ocr_utils import copyStateDict, plot_one_box, Params, four_point_transform
 
 class OCR:
     def __init__(self, cfg):
@@ -35,27 +26,17 @@ class OCR:
         self.toTensor = transforms.ToTensor()
 
     def load_net(self):
-        """ Loading detection network"""
-        self.craft = CRAFT()     # initialize
-        print('Loading box detection weights from checkpoint (' + self.cfg.craft_model + ')')
-        if self.cfg.cuda:
-            self.craft.load_state_dict(copyStateDict(torch.load(self.cfg.craft_model)))
-        else:
-            self.craft.load_state_dict(copyStateDict(torch.load(self.cfg.craft_model, map_location='cpu')))
-        if self.cfg.cuda:
-            self.craft = self.craft.cuda()
-            cudnn.benchmark = False
-        self.craft.eval()
-
-        # craft trt
-        TRT_LOGGER = trt.Logger()
-        with open(self.cfg.craft_engine_path, "rb") as f, trt.Runtime(TRT_LOGGER) as runtime:
-            # Create engine and execution context
-            self.craft_engine = runtime.deserialize_cuda_engine(f.read())
-            self.craft_context = self.craft_engine.create_execution_context()
-
-            # Create a stream in which to copy inputs/outputs and run inference.
-            self.craft_stream = cuda.Stream()
+        # """ Loading detection network"""
+        # self.craft = CRAFT()     # initialize
+        # print('Loading box detection weights from checkpoint (' + self.cfg.craft_model + ')')
+        # if self.cfg.cuda:
+            # self.craft.load_state_dict(copyStateDict(torch.load(self.cfg.craft_model)))
+        # else:
+            # self.craft.load_state_dict(copyStateDict(torch.load(self.cfg.craft_model, map_location='cpu')))
+        # if self.cfg.cuda:
+            # self.craft = self.craft.cuda()
+            # torch.backends.cudnn.benchmark = False
+        # self.craft.eval()
 
         # LinkRefiner
         self.refine_net = None
@@ -100,7 +81,41 @@ class OCR:
         self.scatter.load_state_dict(torch.load(self.cfg.scatter_model, map_location=self.device))
         self.scatter.eval()
 
-    def do_craft_trt_inference(self, h_input):
+        # craft trt
+        print('Loading text detection engine (' + self.cfg.craft_engine_path + ')')
+        TRT_LOGGER = trt.Logger()
+        with open(self.cfg.craft_engine_path, "rb") as f, trt.Runtime(TRT_LOGGER) as runtime:
+            # Create engine and execution context
+            self.craft_engine = runtime.deserialize_cuda_engine(f.read())
+            self.craft_context = self.craft_engine.create_execution_context()
+
+            # Create a stream in which to copy inputs/outputs and run inference.
+            self.craft_stream = cuda.Stream()
+
+
+    def craft_pre_process(self, image):
+        def resize(image):
+            height, width, _ = image.shape
+            resized = cv2.resize(image, (self.cfg.craft_target_width, self.cfg.craft_target_height), interpolation=cv2.INTER_LINEAR)
+            ratio_w = width / self.cfg.craft_target_width
+            ratio_h = height / self.cfg.craft_target_height
+            return resized, ratio_w, ratio_h
+
+        # Resize aspect
+        # img_resized, target_ratio, _ = imgproc.resize_aspect_ratio(image, self.cfg.craft_canvas_size,
+                                                                   # interpolation=cv2.INTER_LINEAR, mag_ratio=self.cfg.craft_mag_ratio)
+
+        # Resize fix
+        img_resized, ratio_w, ratio_h = resize(image)
+
+        # Normalize and transpose
+        x = imgproc.normalizeMeanVariance(img_resized)
+        x = np.transpose(x, (2, 0, 1))
+        x = np.expand_dims(x, axis=0)
+        x = np.ascontiguousarray(x)
+        return x, ratio_w, ratio_h
+
+    def craft_trt_inference(self, h_input):
         # TODO: - remove feature output head
         #       - optimization profile ?
         # Get indexes
@@ -138,18 +153,26 @@ class OCR:
         # Sync stream
         self.craft_stream.synchronize()
 
-        return h_output_y
+        # Reshape output
+        b, _, h, w = h_input.shape
+        y = h_output_y.reshape((b, int(h / 2), int(w / 2), 2))
 
-    def craft_pre_process(self, image):
-        # Resize
-        img_resized, target_ratio, _ = imgproc.resize_aspect_ratio(image, self.cfg.craft_canvas_size,
-                                                                   interpolation=cv2.INTER_LINEAR, mag_ratio=self.cfg.craft_mag_ratio)
-        # Normalize and transpose
-        x = imgproc.normalizeMeanVariance(img_resized)
-        x = np.transpose(x, (2, 0, 1))
-        x = np.expand_dims(x, axis=0)
-        x = np.ascontiguousarray(x)
-        return x, target_ratio
+        # Make score and link map
+        score_text = y[0, :, :, 0]
+        score_link = y[0, :, :, 1]
+        return y, score_text, score_link
+
+    def craft_inference(self, x):
+        x = torch.from_numpy(x)
+        if self.cfg.cuda:
+            x = x.to(self.device)
+        with torch.no_grad():
+            y, _ = self.craft(x)
+
+        # Make score and link map
+        score_text = y[0,:,:,0].cpu().data.numpy()
+        score_link = y[0,:,:,1].cpu().data.numpy()
+        return y, score_text, score_link
 
     def craft_post_process(self, score_text, score_link, ratio_w, ratio_h):
         # Get detection boxes
@@ -164,25 +187,18 @@ class OCR:
                 polys[k] = boxes[k]
         return boxes, polys
 
-    # def detection(self, image, is_rendered=False):
     def detection(self, image):
         t0 = time.time()
-        x, target_ratio = self.craft_pre_process(image)
-        ratio_h = ratio_w = 1 / target_ratio
+        x, ratio_w, ratio_h = self.craft_pre_process(image)
         t1 = time.time()
         print(f"\tDet pre: {t1 - t0}")
 
         # Do inference and reshape result
         t0 = time.time()
-        y = self.do_craft_trt_inference(x)
-        b, _, h, w = x.shape
-        y = y.reshape((b, int(h / 2), int(w / 2), 2))
-
-        # make score and link map
-        score_text = y[0, :, :, 0]
-        score_link = y[0, :, :, 1]
+        _, score_text, score_link = self.craft_trt_inference(x)
+        # _, score_text, score_link = self.craft_inference(x)
         t1 = time.time()
-        print(f"\tDet TRT forward: {t1 - t0}")
+        print(f"\tDet infer: {t1 - t0}")
 
         # # refine link
         # if self.refine_net is not None:
@@ -195,7 +211,7 @@ class OCR:
         boxes, polys = self.craft_post_process(score_text, score_link, ratio_w, ratio_h)
         t1 = time.time()
         print(f"\tDet post total: {t1 - t0}")
-        return boxes, polys, score_text, target_ratio
+        return boxes, polys, score_text
 
     def scatter_pre_process(self, pts, clone, tensors):
         rect = cv2.boundingRect(pts)
@@ -306,7 +322,8 @@ class OCR:
         t1 = time.time()
         print(f"Pre: {t1 - t0}")
         t0 = time.time()
-        _, polys, _, _ = self.detection(transformed_image)
+        # _, polys, _, _ = self.detection(transformed_image)
+        _, polys, _ = self.detection(transformed_image)
         t1 = time.time()
         print(f"Detection total: {t1 - t0}")
         t0 = time.time()
